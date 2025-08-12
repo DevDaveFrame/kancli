@@ -107,28 +107,3 @@ func (b *Board) GetTasksByColumn(columnId int64) []Task {
     }
     return tasks
 }
-
-// AddTask adds a task to the board's task list
-func (b *Board) AddTask(task Task) {
-    b.Tasks = append(b.Tasks, task)
-}
-
-// RemoveTask removes a task from the board's task list
-func (b *Board) RemoveTask(taskId int64) {
-    for i, task := range b.Tasks {
-        if task.Id == taskId {
-            b.Tasks = append(b.Tasks[:i], b.Tasks[i+1:]...)
-            break
-        }
-    }
-}
-
-// UpdateTask updates a task in the board's task list
-func (b *Board) UpdateTask(updatedTask Task) {
-    for i, task := range b.Tasks {
-        if task.Id == updatedTask.Id {
-            b.Tasks[i] = updatedTask
-            break
-        }
-    }
-}

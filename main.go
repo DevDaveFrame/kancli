@@ -55,7 +55,6 @@ type Model struct {
 	focused   int
 	mode      Mode
 	err       error
-	test      int
 }
 
 type inputPane struct {
@@ -107,69 +106,71 @@ func NewModel(database *db.TaskDB) *Model {
 		m.err = err
 	}
 
+	// Initialize UI columns and items directly from the DB
+	if m.err == nil {
+		if err := m.initColumnsFromDB(); err != nil {
+			m.err = err
+		}
+	}
 	return m
 }
 
-// rebuildColumns rebuilds all column UI state from board data
-func (m *Model) rebuildColumns(width, height int) {
+// initColumnsFromDB builds list models for each column and loads items from the DB.
+func (m *Model) initColumnsFromDB() error {
 	if len(m.board.Columns) == 0 {
+		return nil
+	}
+
+	m.columns = make([]list.Model, len(m.board.Columns))
+
+	for i, column := range m.board.Columns {
+		// Load tasks for this column from the DB
+		tasks, err := m.taskRepo.GetByColumnId(column.Id)
+		if err != nil {
+			return err
+		}
+
+		// Convert to list items
+		items := make([]list.Item, len(tasks))
+		for j := range tasks {
+			items[j] = tasks[j]
+		}
+
+		delegate := list.NewDefaultDelegate()
+		c := lipgloss.Color("#325D59")
+		c2 := lipgloss.Color("#325D59")
+		delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Bold(true).Foreground(c).BorderLeftForeground(c)
+		delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(c2).BorderLeftForeground(c2)
+
+		// Size is adjusted on WindowSize messages
+		lm := list.New(items, delegate, 0, 0)
+		lm.Title = column.Name
+		lm.Styles.Title = lm.Styles.Title.Background(c)
+		lm.Styles.FilterCursor = lm.Styles.FilterCursor.Background(c)
+		lm.SetShowHelp(false)
+
+		m.columns[i] = lm
+	}
+	return nil
+}
+
+// rebuildColumns resizes and retitles existing column UI; it does not reload items
+func (m *Model) rebuildColumns(width, height int) {
+	if len(m.board.Columns) == 0 || len(m.columns) == 0 {
 		return
 	}
 
 	columnWidth := width / len(m.board.Columns)
 	columnHeight := height - 10 // Leave space for input and help
 
-	// Preserve existing columns if they exist (to maintain selection state)
-	if len(m.columns) != len(m.board.Columns) {
-		m.columns = make([]list.Model, len(m.board.Columns))
-	}
-
 	for i, column := range m.board.Columns {
-		// Get tasks for this column from the board
-		columnTasks := m.board.GetTasksByColumn(column.Id)
-
-		// Convert tasks to list items
-		items := make([]list.Item, 0, len(columnTasks))
-		for _, task := range columnTasks {
-			items = append(items, task)
-		}
-
-		// Create or update list model
-		if i >= len(m.columns) || m.columns[i].Title != column.Name {
-			delegate := list.NewDefaultDelegate()
-			// Change colors
-			c := lipgloss.Color("#325D59")
-			c2 := lipgloss.Color("#325D59")
-			delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Bold(true).Foreground(c).BorderLeftForeground(c)
-			delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(c2).BorderLeftForeground(c2)
-
-			listModel := list.New(items, delegate, columnWidth-2, columnHeight)
-			listModel.Title = column.Name
-			listModel.Styles.Title = listModel.Styles.Title.Background(c)
-			listModel.Styles.FilterCursor = listModel.Styles.FilterCursor.Background(c)
-			listModel.SetShowHelp(false)
-			m.columns[i] = listModel
-		} else {
-			// Update existing list with new items and dimensions
-			m.columns[i].SetItems(items)
+		if i < len(m.columns) {
+			m.columns[i].Title = column.Name
 			m.columns[i].SetSize(columnWidth-2, columnHeight)
 		}
 	}
 }
 
-// syncColumnData updates the UI lists to match board data (call after data changes)
-func (m *Model) syncColumnData() {
-	for i, column := range m.board.Columns {
-		if i < len(m.columns) {
-			columnTasks := m.board.GetTasksByColumn(column.Id)
-			items := make([]list.Item, 0, len(columnTasks))
-			for _, task := range columnTasks {
-				items = append(items, task)
-			}
-			m.columns[i].SetItems(items)
-		}
-	}
-}
 
 // getSelectedTask returns the currently selected task in the focused column, if any
 func (m *Model) getSelectedTask() (models.Task, bool) {
@@ -208,11 +209,8 @@ func (m *Model) createTask(title, description string) error {
 		return err
 	}
 
-	// Update board state (single source of truth)
-	m.board.AddTask(task)
-
-	// Sync UI with updated data
-	m.syncColumnData()
+	// Update UI only
+	m.columns[m.focused].InsertItem(0, task)
 
 	return nil
 }
@@ -298,9 +296,9 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 					task.StatusColumnId = m.board.Columns[m.focused].Id
 					m.err = err
 				} else {
-					m.board.UpdateTask(task)
-					m.syncColumnData()
-					m.focused++
+					m.columns[m.focused].RemoveItem(m.columns[m.focused].Index())
+					m.columns[m.focused-1].InsertItem(0, task)
+					m.focused--
 				}
 			}
 		}
@@ -313,8 +311,8 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 					task.StatusColumnId = m.board.Columns[m.focused].Id
 					m.err = err
 				} else {
-					m.board.UpdateTask(task)
-					m.syncColumnData()
+					m.columns[m.focused].RemoveItem(m.columns[m.focused].Index())
+					m.columns[m.focused+1].InsertItem(0, task)
 					m.focused++
 				}
 			}
@@ -325,9 +323,7 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 			if err := m.taskRepo.Delete(task.Id); err != nil {
 				m.err = err
 			} else {
-				// Remove from board state and sync UI
-				m.board.RemoveTask(task.Id)
-				m.syncColumnData()
+				m.columns[m.focused].RemoveItem(m.columns[m.focused].Index())
 			}
 		}
 	case "i":
@@ -454,6 +450,12 @@ func (m *Model) loadBoard() error {
 			}
 		}
 
+		// Load columns we just created into board state
+		cols, err := m.columnRepo.GetByBoardId(board.Id)
+		if err != nil {
+			return err
+		}
+		board.Columns = cols
 		m.board = *board
 	} else {
 		// Load existing board

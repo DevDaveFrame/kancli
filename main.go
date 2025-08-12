@@ -29,6 +29,54 @@ func main() {
 	}
 }
 
+// ========= STYLES SECTION =========
+
+var (
+	pineGreen    = lipgloss.Color("#325D59")
+	glacierBlue  = lipgloss.Color("#325D70")
+	coralRed     = lipgloss.Color("#FF6F59")
+	darkRed      = lipgloss.Color("#771B18")
+
+	// Default column colors
+	todoColor       = "#ff6b6b"
+	inProgressColor = "#4ecdc4"
+	doneColor       = "#45b7d1"
+)
+
+var (
+	focusedColumnStyle = lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(coralRed).
+		Padding(2).
+		Bold(true)
+
+	unfocusedColumnStyle = lipgloss.NewStyle().
+		BorderStyle(lipgloss.RoundedBorder()).
+		BorderForeground(darkRed).
+		Padding(2)
+
+	inputPaneStyle = lipgloss.NewStyle().
+		BorderStyle(lipgloss.NormalBorder()).
+		BorderForeground(coralRed)
+)
+
+func createListDelegate() list.DefaultDelegate {
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Bold(true).Foreground(pineGreen).BorderLeftForeground(pineGreen)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(glacierBlue).BorderLeftForeground(glacierBlue)
+	return delegate
+}
+
+func styleListModel(lm list.Model) list.Model {
+	lm.Styles.Title = lm.Styles.Title.Background(pineGreen)
+	lm.Styles.FilterCursor = lm.Styles.FilterCursor.Background(pineGreen)
+	lm.SetShowHelp(false)
+	return lm
+}
+
+// ========= END STYLES SECTION =========
+
+// ========= MODEL SECTION =========
 type Mode int
 
 const (
@@ -37,7 +85,6 @@ const (
 )
 
 type Model struct {
-	// Database connection
 	db *db.TaskDB
 
 	// Repositories (for database operations)
@@ -45,7 +92,7 @@ type Model struct {
 	columnRepo *models.StatusColumnRepository
 	taskRepo   *models.TaskRepository
 
-	board   models.Board // Contains both Columns and Tasks
+	board   models.Board // Contains metadata about the board (for when we have multiple boards)
 	columns []list.Model // UI components derived from board data
 
 	// UI state
@@ -86,7 +133,6 @@ func initInputPane() inputPane {
 }
 
 func NewModel(database *db.TaskDB) *Model {
-	// Create repositories
 	boardRepo := models.NewBoardRepository(database)
 	columnRepo := models.NewStatusColumnRepository(database)
 	taskRepo := models.NewTaskRepository(database)
@@ -101,12 +147,10 @@ func NewModel(database *db.TaskDB) *Model {
 		mode:       Normal,
 	}
 
-	// Load or create a default board
 	if err := m.loadBoard(); err != nil {
 		m.err = err
 	}
 
-	// Initialize UI columns and items directly from the DB
 	if m.err == nil {
 		if err := m.initColumnsFromDB(); err != nil {
 			m.err = err
@@ -115,7 +159,6 @@ func NewModel(database *db.TaskDB) *Model {
 	return m
 }
 
-// initColumnsFromDB builds list models for each column and loads items from the DB.
 func (m *Model) initColumnsFromDB() error {
 	if len(m.board.Columns) == 0 {
 		return nil
@@ -124,7 +167,6 @@ func (m *Model) initColumnsFromDB() error {
 	m.columns = make([]list.Model, len(m.board.Columns))
 
 	for i, column := range m.board.Columns {
-		// Load tasks for this column from the DB
 		tasks, err := m.taskRepo.GetByColumnId(column.Id)
 		if err != nil {
 			return err
@@ -136,41 +178,15 @@ func (m *Model) initColumnsFromDB() error {
 			items[j] = tasks[j]
 		}
 
-		delegate := list.NewDefaultDelegate()
-		c := lipgloss.Color("#325D59")
-		c2 := lipgloss.Color("#325D59")
-		delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.Bold(true).Foreground(c).BorderLeftForeground(c)
-		delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.Foreground(c2).BorderLeftForeground(c2)
-
-		// Size is adjusted on WindowSize messages
+		delegate := createListDelegate()
 		lm := list.New(items, delegate, 0, 0)
 		lm.Title = column.Name
-		lm.Styles.Title = lm.Styles.Title.Background(c)
-		lm.Styles.FilterCursor = lm.Styles.FilterCursor.Background(c)
-		lm.SetShowHelp(false)
+		lm = styleListModel(lm)
 
 		m.columns[i] = lm
 	}
 	return nil
 }
-
-// rebuildColumns resizes and retitles existing column UI; it does not reload items
-func (m *Model) rebuildColumns(width, height int) {
-	if len(m.board.Columns) == 0 || len(m.columns) == 0 {
-		return
-	}
-
-	columnWidth := width / len(m.board.Columns)
-	columnHeight := height - 10 // Leave space for input and help
-
-	for i, column := range m.board.Columns {
-		if i < len(m.columns) {
-			m.columns[i].Title = column.Name
-			m.columns[i].SetSize(columnWidth-2, columnHeight)
-		}
-	}
-}
-
 
 // getSelectedTask returns the currently selected task in the focused column, if any
 func (m *Model) getSelectedTask() (models.Task, bool) {
@@ -220,13 +236,11 @@ func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 	case "ctrl+c":
 		return m, tea.Quit
 	case "esc":
-		// Exit insert mode
 		m.mode = Normal
 		m.inputPane.titleInput.Blur()
 		m.inputPane.descriptionInput.Blur()
 		return m, nil
 	case "tab":
-		// Switch between title and description inputs
 		if m.inputPane.focused == 0 {
 			m.inputPane.focused = 1
 			m.inputPane.titleInput.Blur()
@@ -237,7 +251,6 @@ func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 			return m, m.inputPane.titleInput.Focus()
 		}
 	case "enter":
-		// Create the task
 		title := m.inputPane.titleInput.Value()
 		description := m.inputPane.descriptionInput.Value()
 
@@ -245,7 +258,6 @@ func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 			if err := m.createTask(title, description); err != nil {
 				m.err = err
 			} else {
-				// Clear inputs and exit insert mode
 				m.inputPane.titleInput.SetValue("")
 				m.inputPane.descriptionInput.SetValue("")
 				m.inputPane.titleInput.Blur()
@@ -257,7 +269,6 @@ func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Update the focused input
 	var cmd tea.Cmd
 	if m.inputPane.focused == 0 {
 		m.inputPane.titleInput, cmd = m.inputPane.titleInput.Update(msg)
@@ -345,7 +356,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.height = msg.Height
 		m.width = msg.Width
-		m.rebuildColumns(msg.Width, msg.Height)
+		// Set list sizes when window size changes
+		if len(m.columns) > 0 {
+			columnWidth := m.width / len(m.columns) - 2
+			columnHeight := m.height - 10
+			for i := range m.columns {
+				m.columns[i].SetSize(columnWidth, columnHeight)
+			}
+		}
 	case tea.KeyMsg:
 		switch m.mode {
 		case Insert:
@@ -373,34 +391,15 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	// Calculate the width for each column
-	columnWidth := m.columns[0].Width()
-	adjustedColumnWidth := columnWidth // for padding
-	// Define styles for focused and unfocused columns
-	focusedStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#FF6F59")).
-		Padding(2).
-		Bold(true).
-		Width(adjustedColumnWidth)
-
-	unfocusedStyle := lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#771B18")).
-		Padding(2).
-		Width(adjustedColumnWidth)
-
 	column_views := make([]string, len(m.columns))
 	for i, col := range m.columns {
-		// Apply different styles based on focus
 		if i == m.focused {
-			column_views[i] = focusedStyle.Render(col.View())
+			column_views[i] = focusedColumnStyle.Render(col.View())
 		} else {
-			column_views[i] = unfocusedStyle.Render(col.View())
+			column_views[i] = unfocusedColumnStyle.Render(col.View())
 		}
 	}
 
-	// Add a help text at the bottom
 	var helpText string
 	var inputPaneView string
 
@@ -412,10 +411,10 @@ func (m Model) View() string {
 		inputPaneView = ""
 	}
 
-	ip_style := lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("#FF6F59")).Width(m.width - 4)
+	ipStyle := inputPaneStyle.Width(m.width - 4)
 	view := lipgloss.JoinHorizontal(lipgloss.Center, column_views...) + helpText
 	if inputPaneView != "" {
-		view += ip_style.Render(inputPaneView)
+		view += ipStyle.Render(inputPaneView)
 	}
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, view)
 }
@@ -439,9 +438,9 @@ func (m *Model) loadBoard() error {
 
 		// Create default columns
 		defaultColumns := []models.StatusColumn{
-			{BoardId: board.Id, Name: "To Do", Position: 0, Color: "#ff6b6b"},
-			{BoardId: board.Id, Name: "In Progress", Position: 1, Color: "#4ecdc4"},
-			{BoardId: board.Id, Name: "Done", Position: 2, Color: "#45b7d1"},
+			{BoardId: board.Id, Name: "To Do", Position: 0, Color: todoColor},
+			{BoardId: board.Id, Name: "In Progress", Position: 1, Color: inProgressColor},
+			{BoardId: board.Id, Name: "Done", Position: 2, Color: doneColor},
 		}
 
 		for _, col := range defaultColumns {

@@ -55,6 +55,14 @@ func (t Task) FilterValue() string {
     return t.title
 }
 
+func (t *Task) SetTitle(title string) {
+    t.title = title
+}
+
+func (t *Task) SetDescription(description string) {
+    t.description = description
+}
+
 // NewTask creates a new Task with the given title and description
 func NewTask(title, description string) Task {
     now := time.Now()

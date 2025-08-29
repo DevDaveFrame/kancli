@@ -32,10 +32,10 @@ func main() {
 // ========= STYLES SECTION =========
 
 var (
-	pineGreen    = lipgloss.Color("#325D59")
-	glacierBlue  = lipgloss.Color("#325D70")
-	coralRed     = lipgloss.Color("#FF6F59")
-	darkRed      = lipgloss.Color("#771B18")
+	pineGreen   = lipgloss.Color("#325D59")
+	glacierBlue = lipgloss.Color("#325D70")
+	coralRed    = lipgloss.Color("#FF6F59")
+	darkRed     = lipgloss.Color("#771B18")
 
 	// Default column colors
 	todoColor       = "#ff6b6b"
@@ -44,20 +44,19 @@ var (
 )
 
 var (
-	focusedColumnStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(coralRed).
-		Padding(2).
-		Bold(true)
+	columnStyle = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			Padding(1)
 
-	unfocusedColumnStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(darkRed).
-		Padding(2)
+	unfocusedColumnStyle = columnStyle.BorderForeground(darkRed)
+
+	focusedColumnStyle = columnStyle.
+				BorderForeground(coralRed).
+				Bold(true)
 
 	inputPaneStyle = lipgloss.NewStyle().
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(coralRed)
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(coralRed)
 )
 
 func createListDelegate() list.DefaultDelegate {
@@ -105,6 +104,8 @@ type Model struct {
 }
 
 type inputPane struct {
+	taskId           int64
+	listIndex        int
 	titleInput       textinput.Model
 	descriptionInput textinput.Model
 	focused          int
@@ -231,6 +232,21 @@ func (m *Model) createTask(title, description string) error {
 	return nil
 }
 
+func (m *Model) updateTask(title, description string) error {
+	if task, ok := m.getSelectedTask(); ok {
+		task.SetTitle(title)
+		task.SetDescription(description)
+		if err := m.taskRepo.Update(&task); err != nil {
+			task.StatusColumnId = m.board.Columns[m.focused].Id
+			return err
+		} else {
+			m.columns[m.focused].SetItem(m.inputPane.listIndex, task)
+		}
+		m.inputPane.listIndex = -1
+	}
+	return nil
+}
+
 func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -253,18 +269,23 @@ func handleInsert(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 	case "enter":
 		title := m.inputPane.titleInput.Value()
 		description := m.inputPane.descriptionInput.Value()
-
-		if title != "" {
-			if err := m.createTask(title, description); err != nil {
-				m.err = err
-			} else {
-				m.inputPane.titleInput.SetValue("")
-				m.inputPane.descriptionInput.SetValue("")
-				m.inputPane.titleInput.Blur()
-				m.inputPane.descriptionInput.Blur()
-				m.inputPane.focused = 0
-				m.mode = Normal
+		var err error
+		if m.inputPane.taskId != -1 {
+			err = m.updateTask(title, description)
+		} else {
+			if title != "" {
+				err = m.createTask(title, description)
 			}
+		}
+		if err != nil {
+			m.err = err
+		} else {
+			m.inputPane.titleInput.SetValue("")
+			m.inputPane.descriptionInput.SetValue("")
+			m.inputPane.titleInput.Blur()
+			m.inputPane.descriptionInput.Blur()
+			m.inputPane.focused = 0
+			m.mode = Normal
 		}
 		return m, nil
 	}
@@ -337,10 +358,22 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 				m.columns[m.focused].RemoveItem(m.columns[m.focused].Index())
 			}
 		}
+	case "e":
+		if task, ok := m.getSelectedTask(); ok {
+			m.inputPane.titleInput.SetValue(task.Title())
+			m.inputPane.descriptionInput.SetValue(task.Description())
+			m.mode = Insert
+			m.inputPane.focused = 0
+			m.inputPane.taskId = task.Id
+			m.inputPane.listIndex = m.columns[m.focused].Index()
+			return m, m.inputPane.titleInput.Focus()
+		}
 	case "i":
 		// Enter insert mode
 		if !(m.columns[m.focused].SettingFilter()) {
 			m.mode = Insert
+			m.inputPane.taskId = -1
+			m.inputPane.listIndex = -1
 			m.inputPane.focused = 0
 			return m, m.inputPane.titleInput.Focus()
 		}
@@ -351,19 +384,23 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *Model) handleWindowSize(width, height int) {
+	m.width = width
+	m.height = height
+	columnWidth := (m.width / len(m.columns)) - 2
+	columnHeight := m.height - 10
+	focusedColumnStyle = focusedColumnStyle.Width(columnWidth).Height(columnHeight)
+	unfocusedColumnStyle = unfocusedColumnStyle.Width(columnWidth).Height(columnHeight)
+	vertical, horizontal := columnStyle.GetFrameSize()
+	for i := range m.columns {
+		m.columns[i].SetSize(columnWidth-horizontal, columnHeight-vertical)
+	}
+}
+
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.height = msg.Height
-		m.width = msg.Width
-		// Set list sizes when window size changes
-		if len(m.columns) > 0 {
-			columnWidth := m.width / len(m.columns) - 2
-			columnHeight := m.height - 10
-			for i := range m.columns {
-				m.columns[i].SetSize(columnWidth, columnHeight)
-			}
-		}
+		m.handleWindowSize(msg.Width, msg.Height)
 	case tea.KeyMsg:
 		switch m.mode {
 		case Insert:
@@ -376,9 +413,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if len(m.columns) > 0 && m.focused < len(m.columns) {
 		// Update the focused column
-		updatedList, newCmd := m.columns[m.focused].Update(msg)
-		m.columns[m.focused] = updatedList
-		cmd = newCmd
+		m.columns[m.focused], cmd = m.columns[m.focused].Update(msg)
 	}
 	return m, cmd
 }
@@ -411,7 +446,7 @@ func (m Model) View() string {
 		inputPaneView = ""
 	}
 
-	ipStyle := inputPaneStyle.Width(m.width - 4)
+	ipStyle := inputPaneStyle.Width(m.width - 2)
 	view := lipgloss.JoinHorizontal(lipgloss.Center, column_views...) + helpText
 	if inputPaneView != "" {
 		view += ipStyle.Render(inputPaneView)

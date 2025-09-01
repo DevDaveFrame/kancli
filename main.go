@@ -392,6 +392,7 @@ func (m *Model) handleWindowSize(width, height int) {
 	focusedColumnStyle = focusedColumnStyle.Width(columnWidth).Height(columnHeight)
 	unfocusedColumnStyle = unfocusedColumnStyle.Width(columnWidth).Height(columnHeight)
 	vertical, horizontal := columnStyle.GetFrameSize()
+	inputPaneStyle = inputPaneStyle.Width(m.width - horizontal)
 	for i := range m.columns {
 		m.columns[i].SetSize(columnWidth-horizontal, columnHeight-vertical)
 	}
@@ -446,10 +447,9 @@ func (m Model) View() string {
 		inputPaneView = ""
 	}
 
-	ipStyle := inputPaneStyle.Width(m.width - 2)
 	view := lipgloss.JoinHorizontal(lipgloss.Center, column_views...) + helpText
 	if inputPaneView != "" {
-		view += ipStyle.Render(inputPaneView)
+		view += inputPaneStyle.Render(inputPaneView)
 	}
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, view)
 }

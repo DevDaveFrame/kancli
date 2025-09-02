@@ -14,6 +14,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var appLogo = `
+ ██████╗ ███████╗████████╗    ██╗████████╗    ██████╗  ██████╗ ███╗   ██╗███████╗
+██╔════╝ ██╔════╝╚══██╔══╝    ██║╚══██╔══╝    ██╔══██╗██╔═══██╗████╗  ██║██╔════╝
+██║  ███╗█████╗     ██║       ██║   ██║       ██║  ██║██║   ██║██╔██╗ ██║█████╗
+██║   ██║██╔══╝     ██║       ██║   ██║       ██║  ██║██║   ██║██║╚██╗██║██╔══╝
+╚██████╔╝███████╗   ██║       ██║   ██║       ██████╔╝╚██████╔╝██║ ╚████║███████╗
+ ╚═════╝ ╚══════╝   ╚═╝       ╚═╝   ╚═╝       ╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝
+`
+
 func main() {
 	flag.Parse()
 	db, err := db.NewDB("kanban")
@@ -44,6 +53,7 @@ var (
 )
 
 var (
+	titlebarStyle = lipgloss.NewStyle().Foreground(coralRed)
 	columnStyle = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			Padding(1)
@@ -388,7 +398,7 @@ func (m *Model) handleWindowSize(width, height int) {
 	m.width = width
 	m.height = height
 	columnWidth := (m.width / len(m.columns)) - 2
-	columnHeight := m.height - 10
+	columnHeight := m.height - 17
 	focusedColumnStyle = focusedColumnStyle.Width(columnWidth).Height(columnHeight)
 	unfocusedColumnStyle = unfocusedColumnStyle.Width(columnWidth).Height(columnHeight)
 	vertical, horizontal := columnStyle.GetFrameSize()
@@ -447,10 +457,12 @@ func (m Model) View() string {
 		inputPaneView = ""
 	}
 
-	view := lipgloss.JoinHorizontal(lipgloss.Center, column_views...) + helpText
+	titlebarView := titlebarStyle.Render(appLogo)
+	boardView := lipgloss.JoinHorizontal(lipgloss.Center, column_views...) + helpText
 	if inputPaneView != "" {
-		view += inputPaneStyle.Render(inputPaneView)
+		inputPaneView = inputPaneStyle.Render(inputPaneView)
 	}
+	view := lipgloss.JoinVertical(lipgloss.Center, titlebarView, boardView, inputPaneView)
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, view)
 }
 

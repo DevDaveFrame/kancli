@@ -54,7 +54,7 @@ var (
 
 var (
 	titlebarStyle = lipgloss.NewStyle().Foreground(coralRed)
-	columnStyle = lipgloss.NewStyle().
+	columnStyle   = lipgloss.NewStyle().
 			BorderStyle(lipgloss.RoundedBorder()).
 			Padding(1)
 
@@ -397,6 +397,11 @@ func handleNormal(msg tea.KeyMsg, m *Model) (tea.Model, tea.Cmd) {
 func (m *Model) handleWindowSize(width, height int) {
 	m.width = width
 	m.height = height
+
+	if len(m.columns) == 0 {
+		return
+	}
+
 	columnWidth := (m.width / len(m.columns)) - 2
 	columnHeight := m.height - 17
 	focusedColumnStyle = focusedColumnStyle.Width(columnWidth).Height(columnHeight)
